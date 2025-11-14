@@ -1,6 +1,0 @@
-../Core/Src/utils.c:17:9:crc_test	16	static
-../Core/Src/utils.c:83:6:printBuffer	24	static
-../Core/Src/utils.c:91:10:util_crc16	32	static
-../Core/Src/utils.c:102:10:util_hw_crc16	24	static
-../Core/Src/utils.c:109:6:get_unique_identifier	24	static
-../Core/Src/utils.c:117:10:fnv1a_32	32	static

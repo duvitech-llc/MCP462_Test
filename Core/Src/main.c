@@ -39,6 +39,10 @@
 /* USER CODE BEGIN PD */
 #define BUFFER_SIZE 128
 
+// Set to 1 to run the original single-channel CH0 example,
+// set to 0 to run the SCAN example (CH0 + CH1 single-ended).
+#define USE_SINGLE_CHANNEL_EXAMPLE  0
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -87,11 +91,15 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
-  MCP3462_Handle adc_handle;
-  bool isADCEnabled = true;
-  int16_t code;
-  uint8_t buf[BUFFER_SIZE] = {0};
-  float voltage;
+	MCP3462_Handle adc_handle;
+	bool   isADCEnabled = true;
+	int16_t  code16;      // still here if you ever use single-channel mode
+	int32_t  code32;      // used for SCAN mode
+	uint8_t  buf[BUFFER_SIZE] = {0};
+	float    voltage_ch0 = 0.0f;
+	float    voltage_ch1 = 0.0f;
+	uint8_t  ch_id = 0;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -128,35 +136,50 @@ int main(void)
   adc_handle.hspi = &hspi1;
   adc_handle.cs_port = ADC_CS_GPIO_Port;
   adc_handle.cs_pin = ADC_CS_Pin;
-  adc_handle.irq_pin = 0;
-  adc_handle.irq_port = NULL;
-  adc_handle.use_crc = false;
   adc_handle.dev_addr = 1;
 
-  HAL_StatusTypeDef st = MCP3462_Init(&adc_handle);
-  if (st != HAL_OK)
-  {
-	  printf("Failed to initialize ADC it is now disabled\r\n");
-	  isADCEnabled = false;
-  }else{
+  HAL_StatusTypeDef st;
 
-    /* Configure ADC and start continuous conversions */
-    st = MCP3462_ConfigSimple(&adc_handle,
-                  MCP3462_OSR_256,
-                  MCP3462_GAIN_1,
-                  MCP3462_DATAFMT_16,
-                  MCP3462_CONV_CONT,
-                  MCP3462_CH0,
-                  MCP3462_AGND);  // VIN+ = CH0, VIN- = AGND
-    if(st == HAL_OK){
-      MCP3462_FastCommand(&adc_handle, MCP3462_FC_CONV_START);
+#if USE_SINGLE_CHANNEL_EXAMPLE
+
+  // ---- Single-channel CH0 example (original working setup) ----
+  st = MCP3462_ConfigSimple(&adc_handle,
+                            MCP3462_OSR_256,
+                            MCP3462_GAIN_1,
+                            MCP3462_DATAFMT_16,
+                            MCP3462_CONV_CONT,
+                            MCP3462_CH0,
+                            MCP3462_AGND);  // VIN+ = CH0, VIN- = AGND
+  if (st == HAL_OK) {
       isADCEnabled = true;
       MCP3462_DumpRegs(&adc_handle, buf, BUFFER_SIZE);
-    }else{
-      printf("Failed to configure ADC it is now disabled\r\n");
+  } else {
+      printf("Failed to configure ADC (single-channel), it is now disabled\r\n");
       isADCEnabled = false;
-    }
   }
+
+#else
+
+  // ---- SCAN example: CH0 and CH1 single-ended ----
+  MCP3462_ScanConfig scan_cfg = {
+      .scan_mask    = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+      .dly_clocks   = 0,   // no extra delay between channels
+      .timer_clocks = 0    // no extra delay between SCAN cycles
+  };
+
+  st = MCP3462_ConfigScan(&adc_handle,
+                          MCP3462_OSR_256,
+                          MCP3462_GAIN_1,
+                          &scan_cfg);
+  if (st == HAL_OK) {
+      isADCEnabled = true;
+      MCP3462_DumpRegs(&adc_handle, buf, BUFFER_SIZE);
+  } else {
+      printf("Failed to configure ADC (SCAN mode), it is now disabled\r\n");
+      isADCEnabled = false;
+  }
+
+#endif
 
   /* USER CODE END 2 */
 
@@ -167,33 +190,79 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  if(isADCEnabled){
-		  st = MCP3462_ReadData16_INC(&adc_handle, &code);
-		  if (st == HAL_OK) {
-			  // Convert ADC code to voltage
-			  // MCP3462 with GAIN_1, 16-bit format, 2.4V internal reference
-			  // Full scale = ±VREF/GAIN = ±2.4V/1 = ±2.4V
-			  // Resolution = 2.4V / 32768 = 73.24µV per LSB
-			  voltage = (float)code * (3.2f / 32768.0f);
+#if USE_SINGLE_CHANNEL_EXAMPLE
 
-		  } else if (st == HAL_BUSY) {
-			  // Data not ready yet, continue
-		  } else {
-			  printf("Failed to read ADC it is now disabled\r\n");
-			  isADCEnabled = false;
-		  }
-	  }
-	  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-	  HAL_Delay(250);
-	  if(isADCEnabled){
-		  if (st == HAL_OK) {
-			  printf("ADC Code: %d, Voltage: %.4fV\r\n", code, voltage);
-		  } else if (st == HAL_BUSY) {
-			  printf("ADC Data not ready\r\n");
-		  } else {
-			  printf("ADC Read error: %d\r\n", st);
-		  }
-	  }
+    // ---------- Single-channel CH0 example ----------
+    if (isADCEnabled) {
+        st = MCP3462_ReadData16_INC(&adc_handle, &code16);
+        if (st == HAL_OK) {
+            // 16-bit signed, ±Vref → use same scaling as before
+            float v = (float)code16 * (3.2f / 32768.0f);  // adjust 3.2f to your actual Vref
+            voltage_ch0 = v;
+        } else if (st != HAL_BUSY) {
+            printf("ADC Read error (single-channel): %d, disabling ADC\r\n", st);
+            isADCEnabled = false;
+        }
+    }
+
+    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+    HAL_Delay(500);
+
+    if (isADCEnabled) {
+        if (st == HAL_OK) {
+            printf("CH0: %.4f V\r\n", voltage_ch0);
+        } else if (st == HAL_BUSY) {
+            printf("ADC Data not ready\r\n");
+        } else {
+            printf("ADC Read error: %d\r\n", st);
+        }
+    }
+
+#else
+
+    // ---------- SCAN example: CH0 + CH1 ----------
+    if (isADCEnabled) {
+        // SPI polling: ReadScanSample() returns HAL_BUSY if data not ready
+    	for(int i = 0; i < 8; i++){
+			st = MCP3462_ReadScanSample(&adc_handle, &ch_id, &code32);
+			if (st == HAL_OK) {
+
+				// code32 now holds a signed 16-bit ADC code in its low 16 bits
+				uint16_t code16 = (uint16_t)code32;
+				float v = (float)code16 * (3.3f / 32768.0f);  // adjust 3.2f to actual Vref
+
+				if (ch_id == 0) {
+					voltage_ch0 = v;
+				} else if (ch_id == 1) {
+					voltage_ch1 = v;
+				} else {
+					// other channels / internal sources, ignore for now
+				}
+
+			} else if (st != HAL_BUSY) {
+				printf("Failed to read ADC (SCAN), disabling ADC (st=%d)\r\n", st);
+				isADCEnabled = false;
+			}
+
+			HAL_Delay(1);
+    	}
+    }
+
+    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+    HAL_Delay(500);
+
+    if (isADCEnabled) {
+        if (st == HAL_OK) {
+            printf("CH0: %.4f V, CH1: %.4f V\r\n", voltage_ch0, voltage_ch1);
+        } else if (st == HAL_BUSY) {
+            printf("ADC Data not ready\r\n");
+        } else {
+            printf("ADC Read error: %d\r\n", st);
+        }
+    }
+
+#endif
+
   }
   /* USER CODE END 3 */
 }

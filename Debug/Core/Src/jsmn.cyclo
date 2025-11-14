@@ -1,6 +1,0 @@
-../Core/Src/jsmn.c:30:19:jsmn_alloc_token	2
-../Core/Src/jsmn.c:48:13:jsmn_fill_token	1
-../Core/Src/jsmn.c:59:18:jsmn_parse_primitive	17
-../Core/Src/jsmn.c:108:18:jsmn_parse_string	23
-../Core/Src/jsmn.c:175:11:jsmn_parse	50
-../Core/Src/jsmn.c:328:6:jsmn_init	1
