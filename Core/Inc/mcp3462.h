@@ -198,6 +198,7 @@ HAL_StatusTypeDef MCP3462_DumpRegs(MCP3462_Handle *dev, uint8_t *buf, uint8_t bu
 HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
                                      MCP3462_OSR   osr,
                                      MCP3462_Gain  gain,
+									 MCP3462_ConvMode mode,
                                      const MCP3462_ScanConfig *scan_cfg);
 
 HAL_StatusTypeDef MCP3462_ReadScanSample(MCP3462_Handle *dev,

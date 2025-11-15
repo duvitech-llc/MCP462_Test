@@ -248,6 +248,7 @@ HAL_StatusTypeDef MCP3462_DumpRegs(MCP3462_Handle *dev, uint8_t *buf, uint8_t bu
 HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
                                      MCP3462_OSR   osr,
                                      MCP3462_Gain  gain,
+									 MCP3462_ConvMode mode,
                                      const MCP3462_ScanConfig *scan_cfg)
 {
     if (!dev || !scan_cfg) return HAL_ERROR;
@@ -279,7 +280,7 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
     if (st != HAL_OK) return st;
 
     /* CONFIG3: continuous SCAN + 32-bit FULL (CH_ID in MSbits) */
-    uint8_t cfg3 = ((uint8_t)MCP3462_CONV_CONT        << MCP3462_CONFIG3_CONVMODE_SHIFT) |
+    uint8_t cfg3 = ((uint8_t)mode        << MCP3462_CONFIG3_CONVMODE_SHIFT) |
                    ((uint8_t)MCP3462_DATAFMT_32_FULL  << MCP3462_CONFIG3_DATAFMT_SHIFT);
     st = MCP3462_WriteReg(dev, MCP3462_REG_CONFIG3, &cfg3, 1);
     if (st != HAL_OK) return st;

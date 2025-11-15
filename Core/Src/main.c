@@ -42,6 +42,7 @@
 // Set to 1 to run the original single-channel CH0 example,
 // set to 0 to run the SCAN example (CH0 + CH1 single-ended).
 #define USE_SINGLE_CHANNEL_EXAMPLE  0
+#define USE_ONE_SHOT 1
 
 /* USER CODE END PD */
 
@@ -147,7 +148,11 @@ int main(void)
                             MCP3462_OSR_256,
                             MCP3462_GAIN_1,
                             MCP3462_DATAFMT_16,
+#if USE_ONE_SHOT
+							MCP3462_CONV_1SHOT_STBY,
+#else
                             MCP3462_CONV_CONT,
+#endif
                             MCP3462_CH0,
                             MCP3462_AGND);  // VIN+ = CH0, VIN- = AGND
   if (st == HAL_OK) {
@@ -170,6 +175,11 @@ int main(void)
   st = MCP3462_ConfigScan(&adc_handle,
                           MCP3462_OSR_256,
                           MCP3462_GAIN_1,
+#if USE_ONE_SHOT
+						  MCP3462_CONV_1SHOT_STBY,
+#else
+						  MCP3462_CONV_CONT,
+#endif
                           &scan_cfg);
   if (st == HAL_OK) {
       isADCEnabled = true;
@@ -190,6 +200,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+#if USE_ONE_SHOT
+	st = MCP3462_FastCommand(&adc_handle, MCP3462_FC_CONV_START);
+	if (st != HAL_OK) {
+		printf("Failed Start Conversion\r\n");
+		isADCEnabled = false;
+	}
+
+#endif
+
 #if USE_SINGLE_CHANNEL_EXAMPLE
 
     // ---------- Single-channel CH0 example ----------
