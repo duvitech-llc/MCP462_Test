@@ -106,6 +106,23 @@ uint16_t util_hw_crc16(uint8_t* buf, uint32_t size)
 	return (uint16_t)uwCRCValue;
 }
 
+
+void DWT_Init(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+void delay_us(uint32_t us)
+{
+    uint32_t cycles_per_us = SystemCoreClock / 1000000;
+    uint32_t start = DWT->CYCCNT;
+    uint32_t delay_cycles = us * cycles_per_us;
+
+    while ((DWT->CYCCNT - start) < delay_cycles);
+}
+
 void get_unique_identifier(uint32_t* uid)
 {
     uid[0] = HAL_GetUIDw0();

@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "mcp3462.h"
+#include "optics.h"
 #include "logging.h"
 #include "utils.h"
 
@@ -43,6 +44,7 @@
 // set to 0 to run the SCAN example (CH0 + CH1 single-ended).
 #define USE_SINGLE_CHANNEL_EXAMPLE  0
 #define USE_ONE_SHOT 1
+#define USE_OPTICS 1
 
 /* USER CODE END PD */
 
@@ -91,7 +93,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+#ifndef USE_OPTICS
 	MCP3462_Handle adc_handle;
 	bool   isADCEnabled = true;
 	int16_t  code16;      // still here if you ever use single-channel mode
@@ -100,6 +102,9 @@ int main(void)
 	float    voltage_ch0 = 0.0f;
 	float    voltage_ch1 = 0.0f;
 	uint8_t  ch_id = 0;
+#else
+	uint16_t buffer_size;
+#endif
 
   /* USER CODE END 1 */
 
@@ -127,13 +132,18 @@ int main(void)
   MX_CRC_Init();
   MX_RNG_Init();
   /* USER CODE BEGIN 2 */
-
+  DWT_Init();
   init_dma_logging();
   printf("\033c");
   printf("ADC Demo FW\r\n\r\n");
   printf("CPU Clock Frequency: %lu MHz\r\n", HAL_RCC_GetSysClockFreq() / 1000000);
   printf("Initialize ADC\r\n");
 
+#ifdef USE_OPTICS
+
+  optics_init();
+
+#elif
   adc_handle.hspi = &hspi1;
   adc_handle.cs_port = ADC_CS_GPIO_Port;
   adc_handle.cs_pin = ADC_CS_Pin;
@@ -190,6 +200,8 @@ int main(void)
   }
 
 #endif
+#endif
+
 
   /* USER CODE END 2 */
 
@@ -200,6 +212,33 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+#ifdef USE_OPTICS
+  	optics_clearBuffer(0);
+  	if(optics_adcStartConversion(0) != HAL_OK){
+  		printf("failed start conversion\r\n");
+  		continue;
+  	}
+  	if(optics_adcReadSamples(0) != HAL_OK){
+  		printf("failed read samples\r\n");
+  		continue;
+  	}
+  	buffer_size = optics_getSize(0);
+  	if(buffer_size > 0){
+  		uint8_t* buffer = optics_getBuffer(0);
+  		// Each sample is 2 bytes (high byte, low byte)
+  		for(uint16_t i = 0; i < buffer_size; i += 2) {
+  			int16_t code = (int16_t)((buffer[i] << 8) | buffer[i+1]);
+  			// Convert to voltage (3.3V reference, GAIN_1, 16-bit signed)
+  			float voltage = (float)code * (3.3f / 32768.0f);
+  			printf("Sample %d: Code=%d, Voltage=%.4fV\r\n", i/2, code, voltage);
+  		}
+  	}
+
+    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+    HAL_Delay(500);
+
+#else
 #if USE_ONE_SHOT
 	st = MCP3462_FastCommand(&adc_handle, MCP3462_FC_CONV_START);
 	if (st != HAL_OK) {
@@ -281,7 +320,7 @@ int main(void)
     }
 
 #endif
-
+#endif
   }
   /* USER CODE END 3 */
 }
@@ -525,6 +564,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(ADC_CS_GPIO_Port, ADC_CS_Pin, GPIO_PIN_SET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(DAC_CS_GPIO_Port, DAC_CS_Pin, GPIO_PIN_SET);
+
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
@@ -549,9 +591,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF0_MCO;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DAC_CS_Pin */
+  GPIO_InitStruct.Pin = DAC_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(DAC_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

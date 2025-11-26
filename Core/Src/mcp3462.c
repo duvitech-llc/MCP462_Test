@@ -1,4 +1,5 @@
 #include "mcp3462.h"
+#include "utils.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -54,7 +55,7 @@ HAL_StatusTypeDef MCP3462_Init(MCP3462_Handle *dev) {
     /* Full reset → unlock map (LOCK=0xA5) per datasheet */
     HAL_StatusTypeDef st = MCP3462_FastCommand(dev, MCP3462_FC_FULL_RESET);
     if (st != HAL_OK) return st;
-    HAL_Delay(1);
+    delay_us(100);
 
     uint8_t key = 0xA5;
     return MCP3462_WriteReg(dev, MCP3462_REG_LOCK, &key, 1);

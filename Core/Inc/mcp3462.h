@@ -15,7 +15,7 @@ typedef struct {
 
     GPIO_TypeDef *cs_port;
     uint16_t      cs_pin;     // Chip Select (required)
-
+    bool 		  enOneshot;
     uint8_t dev_addr;         // 0..3 (matching your MCP3462 ADx pins)
 } MCP3462_Handle;
 
