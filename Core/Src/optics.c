@@ -1,12 +1,13 @@
 #include "main.h"
 #include "optics.h"
 #include "interface_config.h"
+#include "utils.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
-#define USE_ONE_SHOT 1
+#define BUFFER_SIZE 128
 
 /* internal: basic handle validation */
 static inline bool adc_handle_valid(const MCP3462_Handle *a) {
@@ -36,7 +37,11 @@ HAL_StatusTypeDef optics_adcStartConversion(int optic_index) {
     }
 
     OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
-    return MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
+    if(dev->enOneshot){
+    	return MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
+    }
+
+    return HAL_OK;
 }
 
 HAL_StatusTypeDef optics_startLaser(int optic_index, uint16_t power) {
@@ -119,18 +124,34 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
 	HAL_Delay(5);
 
-    /* Configure ADC and start continuous conversions */
-    st = MCP3462_ConfigSimple(&dev->adc_handle,
-                              MCP3462_OSR_256,
-                              MCP3462_GAIN_1,
-                              MCP3462_DATAFMT_16,
-#if USE_ONE_SHOT
-							MCP3462_CONV_1SHOT_STBY,
-#else
-                            MCP3462_CONV_CONT,
-#endif
-							  MCP3462_CH0,
-							  MCP3462_AGND);  // VIN+ = CH0, VIN- = AGND
+	uint8_t conv_type = dev->enOneshot?MCP3462_CONV_1SHOT_STBY:MCP3462_CONV_CONT;
+
+	if(dev->scan_ch_enable) {
+
+		// ---- SCAN example: CH0 and CH1 single-ended ----
+		MCP3462_ScanConfig scan_cfg = {
+		  .scan_mask    =  MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+		  .dly_clocks   = 0,   // no extra delay between channels
+		  .timer_clocks = 0    // no extra delay between SCAN cycles
+		};
+
+		st = MCP3462_ConfigScan(&dev->adc_handle,
+		                          MCP3462_OSR_256,
+		                          MCP3462_GAIN_1,
+								  conv_type,
+		                          &scan_cfg);
+	}else{
+
+		/* Configure ADC and start continuous conversions */
+		st = MCP3462_ConfigSimple(&dev->adc_handle,
+								  MCP3462_OSR_256,
+								  MCP3462_GAIN_1,
+								  MCP3462_DATAFMT_16,
+								  conv_type,
+								  dev->single_chan_p,
+								  dev->single_chan_m);  // VIN+ = CH0, VIN- = AGND
+
+	}
     if (st != HAL_OK) {
     	return st;
     }
@@ -139,12 +160,9 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 	memset(dev->adcSamples, 0, ADC_UART_BUFFER_SIZE);
 	dev->dataPtr = 0;
 
-#if USE_ONE_SHOT
-	st = MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
-	if (st != HAL_OK) {
-		return st;
-	}
-#endif
+
+	uint8_t  buf[BUFFER_SIZE] = {0};
+	MCP3462_DumpRegs(&dev->adc_handle, buf, BUFFER_SIZE);
 
     return HAL_OK;
 
@@ -221,28 +239,69 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 	}
 
     OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+    HAL_StatusTypeDef st = HAL_OK;
+
+if(dev->scan_ch_enable) {
+    uint8_t ch_id;
+    int32_t code32;
+    uint16_t raw_ch0 = 0;
+    uint16_t raw_ch1 = 0;
+
+	for(int i = 0; i < 8; i++){
+		st = MCP3462_ReadScanSample(&dev->adc_handle, &ch_id, &code32);
+		if (st == HAL_OK) {
+
+			// code32 now holds a signed 16-bit ADC code in its low 16 bits
+			uint16_t code16 = (uint16_t)code32;
+
+			if (ch_id == 0) {
+				raw_ch0 = code16;
+			} else if (ch_id == 1) {
+				raw_ch1 = code16;
+			} else {
+				// other channels / internal sources, ignore for now
+			}
+
+			delay_us(1000);
+
+
+		} else if (st != HAL_BUSY) {
+			return st;
+		}
+	}
+	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch0 >> 8);
+	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
+	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch0 & 0xFF);
+	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
+
+	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch1 >> 8);
+	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
+	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch1 & 0xFF);
+	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
+} else {
+
     int16_t code;
-	
+
 	// Read 16 bits from ADCDATA
-    HAL_StatusTypeDef st = MCP3462_ReadData16_INC(&dev->adc_handle, &code);
+    st = MCP3462_ReadData16_INC(&dev->adc_handle, &code);
     if (st != HAL_OK) {
     	return st;
     }
 
     dev->adcSamples[dev->dataPtr++] = (uint8_t)(code >> 8);
+    if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
     dev->adcSamples[dev->dataPtr++] = (uint8_t)(code & 0xFF);
     if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
 
-	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) {
-		dev->dataPtr = 0;
+}
+
+	if(dev->enOneshot) {
+		st = MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
+		if (st != HAL_OK) {
+			return st;
+		}
 	}
 
-#if USE_ONE_SHOT
-	st = MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
-	if (st != HAL_OK) {
-		return st;
-	}
-#endif
 	return HAL_OK;
 }
 

@@ -70,7 +70,7 @@ HAL_StatusTypeDef MCP4922_WriteRaw(MCP4922_Handle *dev,
     uint8_t tx[2] = { (uint8_t)(w >> 8), (uint8_t)(w & 0xFF) };
 
     CS_LOW(dev);
-    HAL_StatusTypeDef st = HAL_SPI_Transmit(dev->hspi, tx, 2, HAL_MAX_DELAY);
+    HAL_StatusTypeDef st = HAL_SPI_Transmit(dev->hspi, tx, 2, 500);
     CS_HIGH(dev);
 
     return st;

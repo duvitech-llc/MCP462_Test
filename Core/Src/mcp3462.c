@@ -9,7 +9,7 @@
 
 /* ---------- SPI core ---------- */
 static HAL_StatusTypeDef txrx(MCP3462_Handle *dev, uint8_t *tx, uint8_t *rx, uint16_t n) {
-    return HAL_SPI_TransmitReceive(dev->hspi, tx, rx, n, HAL_MAX_DELAY);
+    return HAL_SPI_TransmitReceive(dev->hspi, tx, rx, n, 500);
 }
 static inline uint8_t CMD(MCP3462_Handle *dev, uint8_t addr, MCP3462_CmdType t) {
     return (uint8_t)(((dev->dev_addr & 0x3) << 6) | ((addr & 0xF) << 2) | (t & 0x3));
@@ -32,7 +32,7 @@ HAL_StatusTypeDef MCP3462_WriteReg(MCP3462_Handle *dev, MCP3462_Reg r, const uin
     uint8_t status;
     CS_LOW(dev);
     HAL_StatusTypeDef st = txrx(dev, &c, &status, 1); // STATUS
-    if (st == HAL_OK) st = HAL_SPI_Transmit(dev->hspi, (uint8_t*)data, len, HAL_MAX_DELAY);
+    if (st == HAL_OK) st = HAL_SPI_Transmit(dev->hspi, (uint8_t*)data, len, 500);
     CS_HIGH(dev);
     return st;
 }
@@ -43,7 +43,7 @@ HAL_StatusTypeDef MCP3462_ReadReg(MCP3462_Handle *dev, MCP3462_Reg r, uint8_t *d
     uint8_t status;
     CS_LOW(dev);
     HAL_StatusTypeDef st = txrx(dev, &c, &status, 1); // STATUS
-    if (st == HAL_OK) st = HAL_SPI_Receive(dev->hspi, data, len, HAL_MAX_DELAY);
+    if (st == HAL_OK) st = HAL_SPI_Receive(dev->hspi, data, len, 500);
     CS_HIGH(dev);
     return st;
 }
@@ -134,9 +134,9 @@ HAL_StatusTypeDef MCP3462_ReadData16_INC(MCP3462_Handle *dev, int16_t *out)
     uint8_t tx0 = cmd;
 
     CS_LOW(dev);
-    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(dev->hspi, &tx0, &rx[0], 1, HAL_MAX_DELAY);
+    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(dev->hspi, &tx0, &rx[0], 1, 500);
     if (st == HAL_OK) {
-        st = HAL_SPI_Receive(dev->hspi, &rx[1], 2, HAL_MAX_DELAY);
+        st = HAL_SPI_Receive(dev->hspi, &rx[1], 2, 500);
     }
     CS_HIGH(dev);
     if (st != HAL_OK) return st;
@@ -168,8 +168,8 @@ HAL_StatusTypeDef MCP3462_ReadData32_INC(MCP3462_Handle *dev, int32_t *out)
     uint8_t rx[5] = {0};
 
     CS_LOW(dev);
-    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(dev->hspi, &cmd, &rx[0], 1, HAL_MAX_DELAY);
-    if (st == HAL_OK) st = HAL_SPI_Receive(dev->hspi, &rx[1], 4, HAL_MAX_DELAY);
+    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(dev->hspi, &cmd, &rx[0], 1, 500);
+    if (st == HAL_OK) st = HAL_SPI_Receive(dev->hspi, &rx[1], 4, 500);
     CS_HIGH(dev);
     if (st != HAL_OK) return st;
 

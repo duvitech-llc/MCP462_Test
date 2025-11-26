@@ -42,7 +42,7 @@
 
 // Set to 1 to run the original single-channel CH0 example,
 // set to 0 to run the SCAN example (CH0 + CH1 single-ended).
-#define USE_SINGLE_CHANNEL_EXAMPLE  0
+// #define USE_SINGLE_CHANNEL_EXAMPLE  1
 #define USE_ONE_SHOT 1
 #define USE_OPTICS 1
 
@@ -96,14 +96,18 @@ int main(void)
 #ifndef USE_OPTICS
 	MCP3462_Handle adc_handle;
 	bool   isADCEnabled = true;
+#ifdef USE_SINGLE_CHANNEL_EXAMPLE
 	int16_t  code16;      // still here if you ever use single-channel mode
+#else
 	int32_t  code32;      // used for SCAN mode
+#endif
 	uint8_t  buf[BUFFER_SIZE] = {0};
 	float    voltage_ch0 = 0.0f;
 	float    voltage_ch1 = 0.0f;
 	uint8_t  ch_id = 0;
 #else
 	uint16_t buffer_size;
+	uint8_t laser_power = 0;
 #endif
 
   /* USER CODE END 1 */
@@ -143,7 +147,10 @@ int main(void)
 
   optics_init();
 
-#elif
+  optics_startLaser(0,laser_power);
+  optics_adcStartConversion(0);
+
+#else
   adc_handle.hspi = &hspi1;
   adc_handle.cs_port = ADC_CS_GPIO_Port;
   adc_handle.cs_pin = ADC_CS_Pin;
@@ -174,6 +181,7 @@ int main(void)
   }
 
 #else
+  MCP3462_Init(&adc_handle);
 
   // ---- SCAN example: CH0 and CH1 single-ended ----
   MCP3462_ScanConfig scan_cfg = {
@@ -215,10 +223,6 @@ int main(void)
 
 #ifdef USE_OPTICS
   	optics_clearBuffer(0);
-  	if(optics_adcStartConversion(0) != HAL_OK){
-  		printf("failed start conversion\r\n");
-  		continue;
-  	}
   	if(optics_adcReadSamples(0) != HAL_OK){
   		printf("failed read samples\r\n");
   		continue;
@@ -235,6 +239,9 @@ int main(void)
   		}
   	}
 
+  	laser_power+=10;
+  	if(laser_power>100) laser_power = 0;
+  	optics_startLaser(0, laser_power);
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     HAL_Delay(500);
 
