@@ -25,7 +25,7 @@ static OpticsDevice OPTICS_MAP[] = {
 			.vref_mV = 3300,
 			.hspi = &hspi1
 		},
-		.enOneshot = true,  // TEST: Try continuous mode
+		.enOneshot = true,  // oneshot mode: trigger conversion before each read
 		.scan_bits = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
     }
 };

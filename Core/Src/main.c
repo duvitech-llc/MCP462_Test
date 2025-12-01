@@ -45,7 +45,7 @@
 // set to 0 to run the SCAN example (CH0 + CH1 single-ended).
 // #define USE_SINGLE_CHANNEL_EXAMPLE  1
 #define USE_ONE_SHOT 1
-// #define USE_OPTICS 1
+#define USE_OPTICS 1
 
 /* USER CODE END PD */
 
@@ -149,9 +149,7 @@ int main(void)
 #ifdef USE_OPTICS
 
   optics_init();
-
   optics_startLaser(0,laser_power);
-  optics_adcStartConversion(0);
 
 #else
 
@@ -170,6 +168,10 @@ int main(void)
   dac_handle.hspi = &hspi1;
 
   HAL_StatusTypeDef st;
+  
+  MCP3462_Init(&adc_handle);
+  MCP4922_Init(&dac_handle);
+
 
   st = MCP4922_WriteRaw(&dac_handle,
   					     0,
@@ -200,8 +202,6 @@ int main(void)
   }
 
 #else
-  MCP3462_Init(&adc_handle);
-
   // ---- SCAN example: CH0 and CH1 single-ended ----
   MCP3462_ScanConfig scan_cfg = {
       .scan_mask    = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
@@ -242,6 +242,11 @@ int main(void)
 
 #ifdef USE_OPTICS
   	optics_clearBuffer(0);
+
+	if(optics_adcStartConversion(0) != HAL_OK) {
+		printf("++++++++++++> Failed Start Conversion\r\n");
+	}
+
   	if(optics_adcReadSamples(0) != HAL_OK){
   		printf("failed read samples\r\n");
   		continue;
@@ -257,7 +262,6 @@ int main(void)
   			printf("Sample %d: Code=%d, Voltage=%.4fV\r\n", i/2, code, voltage);
   		}
   	}
-
   	laser_power+=10;
   	if(laser_power>100) laser_power = 0;
   	optics_startLaser(0, laser_power);
@@ -329,14 +333,6 @@ int main(void)
 			}
 
 			HAL_Delay(1);
-
-			dac_value = (dac_value + 100)%4096;
-			st = MCP4922_WriteRaw(&dac_handle,
-								 0,
-								 MCP4922_BUF_OFF,
-								 MCP4922_GAIN_1X,
-								 MCP4922_ACTIVE,
-								 dac_value);
     	}
     }
 
@@ -352,6 +348,14 @@ int main(void)
             printf("ADC Read error: %d\r\n", st);
         }
     }
+
+	dac_value = (dac_value + 100)%4096;
+	st = MCP4922_WriteRaw(&dac_handle,
+						 0,
+						 MCP4922_BUF_OFF,
+						 MCP4922_GAIN_1X,
+						 MCP4922_ACTIVE,
+						 dac_value);
 
 #endif
 #endif

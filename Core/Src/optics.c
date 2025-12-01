@@ -115,18 +115,15 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
     /* Bring up devices */
 
+    st  = MCP4922_Init(&dev->dac_handle);
+    if (st != HAL_OK) {
+    	return st;
+    }
+
     st = MCP3462_Init(&dev->adc_handle);
     if (st != HAL_OK) {
     	return st;
     }
-
-	HAL_Delay(5);
-
-   st  = MCP4922_Init(&dev->dac_handle);
-    if (st != HAL_OK) {
-    	return st;
-    }
-
 
 	uint8_t conv_type = dev->enOneshot?MCP3462_CONV_1SHOT_STBY:MCP3462_CONV_CONT;
 
@@ -145,16 +142,17 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 							  &scan_cfg);
 
     if (st != HAL_OK) {
-    	printf("Failed setting configscan\r\n");
+    	printf("+++++++> Failed setting configscan\r\n");
     	return st;
     }
+
+	uint8_t  buf[BUFFER_SIZE] = {0};
+	MCP3462_DumpRegs(&dev->adc_handle, buf, BUFFER_SIZE);
+
 
     /* Clear capture buffer */
 	memset(dev->adcSamples, 0, ADC_UART_BUFFER_SIZE);
 	dev->dataPtr = 0;
-
-	uint8_t  buf[BUFFER_SIZE] = {0};
-	MCP3462_DumpRegs(&dev->adc_handle, buf, BUFFER_SIZE);
 
     return HAL_OK;
 
