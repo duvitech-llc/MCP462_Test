@@ -286,6 +286,12 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
     st = MCP3462_WriteReg(dev, MCP3462_REG_CONFIG3, &cfg3, 1);
     if (st != HAL_OK) return st;
 
+    /* MUX: Set to default/don't care for SCAN mode, but write 0x01 to match working config */
+    /* In SCAN mode, the SCAN register controls which channels are measured */
+    uint8_t mux = 0x01;  // VIN+ = CH0, VIN- = CH1 (though SCAN should override)
+    st = MCP3462_WriteReg(dev, MCP3462_REG_MUX, &mux, 1);
+    if (st != HAL_OK) return st;
+
     /* SCAN: DLY[2:0] + SCAN[15:0] */
     uint32_t scan_val = (((uint32_t)(scan_cfg->dly_clocks & 0x7u)) << 21)
                       | ((uint32_t)scan_cfg->scan_mask & 0xFFFFu);
@@ -294,9 +300,14 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
         (uint8_t)((scan_val >>  8) & 0xFF),
         (uint8_t)( scan_val        & 0xFF)
     };
+    
     st = MCP3462_WriteReg(dev, MCP3462_REG_SCAN, scan_bytes, 3);
     if (st != HAL_OK) return st;
-
+    
+    /* Read back SCAN register to verify */
+    uint8_t scan_readback[3];
+    st = MCP3462_ReadReg(dev, MCP3462_REG_SCAN, scan_readback, 3);
+    
     /* TIMER: delay between SCAN cycles (only used when continuous) */
     uint32_t t = scan_cfg->timer_clocks & 0x00FFFFFFu;
     uint8_t timer_bytes[3] = {
@@ -307,6 +318,14 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
     st = MCP3462_WriteReg(dev, MCP3462_REG_TIMER, timer_bytes, 3);
     if (st != HAL_OK) return st;
 
+    /* Configure IRQ register - enable appropriate interrupt modes for SCAN */
+    /* Bit 6 (0x40) may control SCAN advancement or IRQ output mode */
+    /* Try setting IRQ to 0x73 to match working configuration */
+    uint8_t irq_cfg = 0x73;  // Enable bit 6 + other standard bits
+    st = MCP3462_WriteReg(dev, MCP3462_REG_IRQ, &irq_cfg, 1);
+    if (st != HAL_OK) return st;
+
+    /* Read back IRQ to clear any pending flags */
     uint8_t irq_dummy;
     (void)MCP3462_ReadReg(dev, MCP3462_REG_IRQ, &irq_dummy, 1);
 
@@ -320,12 +339,22 @@ HAL_StatusTypeDef MCP3462_ReadScanSample(MCP3462_Handle *dev,
 {
     if (!dev || !ch_id || !code) return HAL_ERROR;
 
-    int32_t raw32 = 0;
-    HAL_StatusTypeDef st = MCP3462_ReadData32_INC(dev, &raw32);
-    if (st != HAL_OK) {
-        // HAL_BUSY if DRDY not ready, or SPI error
-        return st;
-    }
+    /* In SCAN mode, use STATIC read instead of INC read to properly advance through channels */
+    uint8_t cmd = (uint8_t)(((dev->dev_addr & 0x3) << 6)
+                   | ((MCP3462_REG_ADCDATA & 0xF) << 2)
+                   | MCP3462_CMDTYPE_STATIC_RD);
+    uint8_t rx[5] = {0};
+
+    CS_LOW(dev);
+    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(dev->hspi, &cmd, &rx[0], 1, 500);
+    if (st == HAL_OK) st = HAL_SPI_Receive(dev->hspi, &rx[1], 4, 500);
+    CS_HIGH(dev);
+    if (st != HAL_OK) return st;
+
+    if ((rx[0] & 0x40u) != 0u) return HAL_BUSY;  // DRDY mirror bit6: 0=ready
+
+    int32_t raw32 = (int32_t)((uint32_t)rx[1]<<24 | (uint32_t)rx[2]<<16
+                             | (uint32_t)rx[3]<<8  | (uint32_t)rx[4]);
 
     /* DATA_FORMAT = 32_FULL (DATA_FORMAT[1:0] = 0b11)
      *

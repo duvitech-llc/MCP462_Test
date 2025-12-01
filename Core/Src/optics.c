@@ -3,6 +3,7 @@
 #include "interface_config.h"
 #include "utils.h"
 
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -92,7 +93,8 @@ HAL_StatusTypeDef optics_stopLaser(int optic_index) {
 }
 
 static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
-    if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount)) {
+	HAL_StatusTypeDef st = HAL_OK;
+	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount)) {
         return HAL_ERROR;
     }
     
@@ -113,41 +115,43 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
     /* Bring up devices */
 
-    HAL_StatusTypeDef st = MCP4922_Init(&dev->dac_handle);
+    st = MCP3462_Init(&dev->adc_handle);
     if (st != HAL_OK) {
     	return st;
     }
 
 	HAL_Delay(5);
 
-    st = MCP3462_Init(&dev->adc_handle);
+   st  = MCP4922_Init(&dev->dac_handle);
     if (st != HAL_OK) {
     	return st;
     }
+
 
 	uint8_t conv_type = dev->enOneshot?MCP3462_CONV_1SHOT_STBY:MCP3462_CONV_CONT;
 
 	// ---- SCAN example: CH0 and CH1 single-ended ----
 	MCP3462_ScanConfig scan_cfg = {
-	  .scan_mask    =  MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
-	  .dly_clocks   = 0,   // no extra delay between channels
-	  .timer_clocks = 0    // no extra delay between SCAN cycles
+		.scan_mask    =  MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+		.dly_clocks   = 0,   // no extra delay between channels
+		.timer_clocks = 0    // no extra delay between SCAN cycles
 	};
+
 
 	st = MCP3462_ConfigScan(&dev->adc_handle,
 							  MCP3462_OSR_256,
 							  MCP3462_GAIN_1,
-							  MCP3462_CONV_1SHOT_STBY,
+							  conv_type,
 							  &scan_cfg);
 
     if (st != HAL_OK) {
+    	printf("Failed setting configscan\r\n");
     	return st;
     }
 
     /* Clear capture buffer */
 	memset(dev->adcSamples, 0, ADC_UART_BUFFER_SIZE);
 	dev->dataPtr = 0;
-
 
 	uint8_t  buf[BUFFER_SIZE] = {0};
 	MCP3462_DumpRegs(&dev->adc_handle, buf, BUFFER_SIZE);
@@ -233,30 +237,44 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
     int32_t code32;
     uint16_t raw_ch0 = 0;
     uint16_t raw_ch1 = 0;
+    bool got_ch0 = false;
+    bool got_ch1 = false;
 
-	for(int i = 0; i < 8; i++){
+	// In continuous mode, conversions happen automatically
+	// No need to trigger, just read the data
+
+	// In SCAN mode with 2 channels, we need to read exactly 2 samples per conversion cycle
+	// Try up to 8 times to get both channels (allows for retries if data not ready)
+	for(int i = 0; i < 8 && !(got_ch0 && got_ch1); i++){
 		st = MCP3462_ReadScanSample(&dev->adc_handle, &ch_id, &code32);
 		if (st == HAL_OK) {
 
 			// code32 now holds a signed 16-bit ADC code in its low 16 bits
 			uint16_t code16 = (uint16_t)code32;
 
-			if (ch_id == 0) {
+            if (ch_id == 0 && !got_ch0) {
 				raw_ch0 = code16;
-			} else if (ch_id == 1) {
+				got_ch0 = true;
+			} else if (ch_id == 1 && !got_ch1) {
 				raw_ch1 = code16;
+				got_ch1 = true;
 			} else {
 				// other channels / internal sources, ignore for now
 			}
 
 		} else if (st != HAL_BUSY) {
 			return st;
+		} else {
+			printf("  Read attempt %d: BUSY\r\n", i);
 		}
 
-		HAL_Delay(1);
-
+		// Small delay between read attempts
+		if (!(got_ch0 && got_ch1)) {
+			HAL_Delay(1);
+		}
 	}
 
+	// Store the samples we got
 	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch0 >> 8);
 	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
 	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch0 & 0xFF);
@@ -266,14 +284,6 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
 	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch1 & 0xFF);
 	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
-
-
-	if(dev->enOneshot) {
-		st = MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START);
-		if (st != HAL_OK) {
-			return st;
-		}
-	}
 
 	return HAL_OK;
 }
