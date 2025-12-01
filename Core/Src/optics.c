@@ -73,7 +73,7 @@ HAL_StatusTypeDef optics_startLaser(int optic_index, uint16_t power) {
                            out_mV);
 #endif
 
-	HAL_Delay(OPTICS_SAMPLE_PERIOD_MS);
+    delay_us(OPTICS_SAMPLE_PERIOD_MS*1000);
 }
 
 HAL_StatusTypeDef optics_stopLaser(int optic_index) {
@@ -89,7 +89,7 @@ HAL_StatusTypeDef optics_stopLaser(int optic_index) {
                            MCP4922_GAIN_1X,
                            MCP4922_ACTIVE,
                            0);
-	HAL_Delay(OPTICS_SAMPLE_PERIOD_MS);
+    delay_us(OPTICS_SAMPLE_PERIOD_MS*1000);
 }
 
 static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
@@ -268,7 +268,7 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 
 		// Small delay between read attempts
 		if (!(got_ch0 && got_ch1)) {
-			HAL_Delay(1);
+			delay_us(500);
 		}
 	}
 
