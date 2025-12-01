@@ -318,13 +318,6 @@ HAL_StatusTypeDef MCP3462_ConfigScan(MCP3462_Handle *dev,
     st = MCP3462_WriteReg(dev, MCP3462_REG_TIMER, timer_bytes, 3);
     if (st != HAL_OK) return st;
 
-    /* Configure IRQ register - enable appropriate interrupt modes for SCAN */
-    /* Bit 6 (0x40) may control SCAN advancement or IRQ output mode */
-    /* Try setting IRQ to 0x73 to match working configuration */
-    uint8_t irq_cfg = 0x73;  // Enable bit 6 + other standard bits
-    st = MCP3462_WriteReg(dev, MCP3462_REG_IRQ, &irq_cfg, 1);
-    if (st != HAL_OK) return st;
-
     /* Read back IRQ to clear any pending flags */
     uint8_t irq_dummy;
     (void)MCP3462_ReadReg(dev, MCP3462_REG_IRQ, &irq_dummy, 1);
