@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "mcp3462.h"
+#include "mcp4922.h"
 #include "optics.h"
 #include "logging.h"
 #include "utils.h"
@@ -44,7 +45,7 @@
 // set to 0 to run the SCAN example (CH0 + CH1 single-ended).
 // #define USE_SINGLE_CHANNEL_EXAMPLE  1
 #define USE_ONE_SHOT 1
-#define USE_OPTICS 1
+// #define USE_OPTICS 1
 
 /* USER CODE END PD */
 
@@ -95,7 +96,9 @@ int main(void)
   /* USER CODE BEGIN 1 */
 #ifndef USE_OPTICS
 	MCP3462_Handle adc_handle;
+	MCP4922_Handle dac_handle;
 	bool   isADCEnabled = true;
+	uint16_t dac_value = 0;
 #ifdef USE_SINGLE_CHANNEL_EXAMPLE
 	int16_t  code16;      // still here if you ever use single-channel mode
 #else
@@ -151,13 +154,29 @@ int main(void)
   optics_adcStartConversion(0);
 
 #else
+
   adc_handle.hspi = &hspi1;
   adc_handle.cs_port = ADC_CS_GPIO_Port;
   adc_handle.cs_pin = ADC_CS_Pin;
   adc_handle.dev_addr = 1;
 
+  dac_handle.cs_port = DAC_CS_GPIO_Port;
+  dac_handle.cs_pin = DAC_CS_Pin;
+  dac_handle.ldac_port = NULL;
+  dac_handle.ldac_pin = 0;
+  dac_handle.shdn_port = NULL;
+  dac_handle.shdn_pin = 0;
+  dac_handle.vref_mV = 3300;
+  dac_handle.hspi = &hspi1;
+
   HAL_StatusTypeDef st;
 
+  st = MCP4922_WriteRaw(&dac_handle,
+  					     0,
+                         MCP4922_BUF_OFF,
+                         MCP4922_GAIN_1X,
+                         MCP4922_ACTIVE,
+						 dac_value);
 #if USE_SINGLE_CHANNEL_EXAMPLE
 
   // ---- Single-channel CH0 example (original working setup) ----
@@ -310,6 +329,14 @@ int main(void)
 			}
 
 			HAL_Delay(1);
+
+			dac_value = (dac_value + 100)%4096;
+			st = MCP4922_WriteRaw(&dac_handle,
+								 0,
+								 MCP4922_BUF_OFF,
+								 MCP4922_GAIN_1X,
+								 MCP4922_ACTIVE,
+								 dac_value);
     	}
     }
 

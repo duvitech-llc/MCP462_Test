@@ -17,9 +17,6 @@ typedef struct {
     uint8_t adcSamples[ADC_UART_BUFFER_SIZE];
     uint16_t dataPtr;
     bool enOneshot;
-    uint8_t single_chan_p;
-    uint8_t single_chan_m;
-    bool scan_ch_enable;
     uint16_t scan_bits;
 
     volatile uint16_t dacValue;
