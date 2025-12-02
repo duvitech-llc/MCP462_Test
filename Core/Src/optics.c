@@ -151,8 +151,10 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
 
     /* Clear capture buffer */
-	memset(dev->adcSamples, 0, ADC_UART_BUFFER_SIZE);
-	dev->dataPtr = 0;
+	for(int i = 0; i <MAX_ADC_CHANNELS; i++){
+		memset(&dev->adcSamples[i], 0, ADC_UART_BUFFER_SIZE);
+		dev->dataPtr[i] = 0;
+	}
 
     return HAL_OK;
 
@@ -195,32 +197,46 @@ HAL_StatusTypeDef optics_init() {
     return HAL_OK;
 }
 
-void optics_clearBuffer(int optic_index) {
+void optics_clearBuffers(int optic_index)
+{
 	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount)) {
 		return;
 	}
 
     OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
-	memset(dev->adcSamples, 0, ADC_UART_BUFFER_SIZE);
-	dev->dataPtr = 0;
+    for(int i=0; i<MAX_ADC_CHANNELS; i++){
+		memset(&dev->adcSamples[i], 0, ADC_UART_BUFFER_SIZE);
+		dev->dataPtr[i] = 0;
+    }
+
 }
 
-uint16_t optics_getSize(int optic_index) {
-	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount)) {
+void optics_clearBuffer(int optic_index, uint8_t ch_id) {
+	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount || ch_id >= MAX_ADC_CHANNELS)) {
+		return;
+	}
+
+    OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+	memset(&dev->adcSamples[ch_id], 0, ADC_UART_BUFFER_SIZE);
+	dev->dataPtr[ch_id] = 0;
+}
+
+uint16_t optics_getSize(int optic_index, uint8_t ch_id) {
+	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount || ch_id >= MAX_ADC_CHANNELS)) {
 		return 0;
 	}
 
     OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
-	return dev->dataPtr;
+	return dev->dataPtr[ch_id];
 }
 
-uint8_t* optics_getBuffer(int optic_index) {
-	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount)) {
+uint8_t* optics_getBuffer(int optic_index, uint8_t ch_id) {
+	if ((!hw) || (!hw->map) || (optic_index < 0) || ((uint8_t)optic_index >= OpticsCount || ch_id >= MAX_ADC_CHANNELS)) {
 		return NULL;
 	}
 
     OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
-	return dev->adcSamples;
+	return (uint8_t*)&(dev->adcSamples[ch_id]);
 }
 
 HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
@@ -233,8 +249,6 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 
     uint8_t ch_id;
     int32_t code32;
-    uint16_t raw_ch0 = 0;
-    uint16_t raw_ch1 = 0;
     bool got_ch0 = false;
     bool got_ch1 = false;
 
@@ -247,14 +261,20 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 		st = MCP3462_ReadScanSample(&dev->adc_handle, &ch_id, &code32);
 		if (st == HAL_OK) {
 
+			printf("  ch: %d value: 0x%04X\r\n", ch_id, (uint16_t)code32);
+
 			// code32 now holds a signed 16-bit ADC code in its low 16 bits
 			uint16_t code16 = (uint16_t)code32;
 
-            if (ch_id == 0 && !got_ch0) {
-				raw_ch0 = code16;
+			// Store the samples we got
+			dev->adcSamples[ch_id][dev->dataPtr[ch_id]++] = (uint8_t)(code16 >> 8);
+			if (dev->dataPtr[ch_id] >= ADC_UART_BUFFER_SIZE) dev->dataPtr[ch_id] = 0;
+			dev->adcSamples[ch_id][dev->dataPtr[ch_id]++] = (uint8_t)(code16 & 0xFF);
+			if (dev->dataPtr[ch_id] >= ADC_UART_BUFFER_SIZE) dev->dataPtr[ch_id] = 0;
+
+            if (ch_id == 0) {
 				got_ch0 = true;
-			} else if (ch_id == 1 && !got_ch1) {
-				raw_ch1 = code16;
+			} else if (ch_id == 1) {
 				got_ch1 = true;
 			} else {
 				// other channels / internal sources, ignore for now
@@ -266,22 +286,9 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 			printf("  Read attempt %d: BUSY\r\n", i);
 		}
 
-		// Small delay between read attempts
-		if (!(got_ch0 && got_ch1)) {
-			delay_us(500);
-		}
+		delay_us(1200);
+
 	}
-
-	// Store the samples we got
-	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch0 >> 8);
-	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
-	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch0 & 0xFF);
-	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
-
-	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch1 >> 8);
-	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
-	dev->adcSamples[dev->dataPtr++] = (uint8_t)(raw_ch1 & 0xFF);
-	if (dev->dataPtr >= ADC_UART_BUFFER_SIZE) dev->dataPtr = 0;
 
 	return HAL_OK;
 }

@@ -241,7 +241,6 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
 #ifdef USE_OPTICS
-  	optics_clearBuffer(0);
 
 	if(optics_adcStartConversion(0) != HAL_OK) {
 		printf("++++++++++++> Failed Start Conversion\r\n");
@@ -251,17 +250,21 @@ int main(void)
   		printf("failed read samples\r\n");
   		continue;
   	}
-  	buffer_size = optics_getSize(0);
-  	if(buffer_size > 0){
-  		uint8_t* buffer = optics_getBuffer(0);
-  		// Each sample is 2 bytes (high byte, low byte)
-  		for(uint16_t i = 0; i < buffer_size; i += 2) {
-  			int16_t code = (int16_t)((buffer[i] << 8) | buffer[i+1]);
-  			// Convert to voltage (3.3V reference, GAIN_1, 16-bit signed)
-  			float voltage = (float)code * (3.3f / 32768.0f);
-  			printf("Sample %d: Code=%d, Voltage=%.4fV\r\n", i/2, code, voltage);
-  		}
+  	for(int x = 0; x < 2; x++){
+  		buffer_size = optics_getSize(0, x);
+		if(buffer_size > 0){
+			uint8_t* buffer = optics_getBuffer(0, x);
+			// Each sample is 2 bytes (high byte, low byte)
+			for(uint16_t i = 0; i < buffer_size; i += 2) {
+				uint16_t code = (uint16_t)((buffer[i] << 8) | buffer[i+1]);
+				// Convert to voltage (3.3V reference, GAIN_1, 16-bit signed)
+				float voltage = (float)code * (3.3f / 32767.0f);
+				printf("Sample %d: Code=%d, Voltage=%.4fV\r\n", x, code, voltage);
+			}
+		}
+		optics_clearBuffer(0, x);
   	}
+
   	laser_power+=10;
   	if(laser_power>100) laser_power = 0;
   	optics_startLaser(0, laser_power);
@@ -314,6 +317,8 @@ int main(void)
     	for(int i = 0; i < 8; i++){
 			st = MCP3462_ReadScanSample(&adc_handle, &ch_id, &code32);
 			if (st == HAL_OK) {
+
+				printf("  ch: %d value: 0x%04X\r\n", ch_id, (uint16_t)code32);
 
 				// code32 now holds a signed 16-bit ADC code in its low 16 bits
 				uint16_t code16 = (uint16_t)code32;
