@@ -37,6 +37,17 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index);
 HAL_StatusTypeDef optics_adcStartConversion(int optic_index);
 void optics_clearBuffer(int optic_index, uint8_t ch_id);
 void optics_clearBuffers(int optic_index);
+
+uint32_t optics_get_active_optics_mask(void);
+uint32_t optics_get_active_laser_mask(void);
+HAL_StatusTypeDef optics_startLaser_byMask(uint32_t mask, uint16_t power);
+HAL_StatusTypeDef optics_stopLaser_byMask(uint32_t mask);
+HAL_StatusTypeDef optics_adcStart(uint32_t mask);
+HAL_StatusTypeDef optics_adcStop(uint32_t mask);
+HAL_StatusTypeDef optics_adcRead();
+HAL_StatusTypeDef optics_getBuffer_byMask(uint32_t mask, uint8_t** out_buffer,  uint16_t* out_size);
+HAL_StatusTypeDef optics_clearBuffer_byMask(uint32_t mask);
+
 uint8_t* optics_getBuffer(int optic_index, uint8_t ch_id);
 uint16_t optics_getSize(int optic_index, uint8_t ch_id);
 int optics_getDeviceCount(void);

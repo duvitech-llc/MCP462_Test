@@ -17,6 +17,9 @@ typedef struct {
     uint16_t      cs_pin;     // Chip Select (required)
 
     uint8_t dev_addr;         // 0..3 (matching your MCP3462 ADx pins)
+
+    uint8_t chan_count;
+
 } MCP3462_Handle;
 
 

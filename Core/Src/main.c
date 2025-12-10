@@ -242,7 +242,7 @@ int main(void)
 
 #ifdef USE_OPTICS
 
-	if(optics_adcStartConversion(0) != HAL_OK) {
+	if(optics_adcStart(0x03) != HAL_OK) {
 		printf("++++++++++++> Failed Start Conversion\r\n");
 	}
 
@@ -262,9 +262,10 @@ int main(void)
 				printf("Sample %d: Code=%d, Voltage=%.4fV\r\n", x, code, voltage);
 			}
 		}
-		optics_clearBuffer(0, x);
   	}
 
+	optics_clearBuffer_byMask(0x0003);
+	optics_adcStop(0x03);
   	laser_power+=10;
   	if(laser_power>100) laser_power = 0;
   	optics_startLaser(0, laser_power);

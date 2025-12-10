@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define BUFFER_SIZE 128
+// #define BUFFER_SIZE 128
 
 /* internal: basic handle validation */
 static inline bool adc_handle_valid(const MCP3462_Handle *a) {
@@ -20,6 +20,8 @@ static inline bool dac_handle_valid(const MCP4922_Handle *d) {
 
 static const OpticsHwDesc* hw = NULL;
 static uint8_t OpticsCount = 0;
+static uint32_t active_optics_mask = 0;
+static uint32_t active_laser_mask = 0;
 
 /* Weak default: links even if the product doesn’t provide a mapping */
 __attribute__((weak))
@@ -129,7 +131,7 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
 
 	// ---- SCAN example: CH0 and CH1 single-ended ----
 	MCP3462_ScanConfig scan_cfg = {
-		.scan_mask    =  MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+		.scan_mask    =  dev->scan_bits,
 		.dly_clocks   = 0,   // no extra delay between channels
 		.timer_clocks = 0    // no extra delay between SCAN cycles
 	};
@@ -146,8 +148,8 @@ static HAL_StatusTypeDef initialize_optic_device(int optic_index) {
     	return st;
     }
 
-	uint8_t  buf[BUFFER_SIZE] = {0};
-	MCP3462_DumpRegs(&dev->adc_handle, buf, BUFFER_SIZE);
+	// uint8_t  buf[BUFFER_SIZE] = {0};
+	// MCP3462_DumpRegs(&dev->adc_handle, buf, BUFFER_SIZE);
 
 
     /* Clear capture buffer */
@@ -193,6 +195,9 @@ HAL_StatusTypeDef optics_init() {
             return st;
         }
     }
+    
+    active_optics_mask = 0;
+    active_laser_mask = 0;
 
     return HAL_OK;
 }
@@ -295,4 +300,285 @@ HAL_StatusTypeDef optics_adcReadSamples(int optic_index) {
 
 int optics_getDeviceCount(void) {
     return (int)OpticsCount;
+}
+
+HAL_StatusTypeDef optics_adcStart(uint32_t mask)
+{
+	HAL_StatusTypeDef status = HAL_OK;
+    if ((!hw) || (!hw->map)) {
+        return HAL_ERROR;
+    }
+    
+    active_optics_mask |= mask;
+
+	for(int x=0; x<OpticsCount; x++)
+	{
+
+	    OpticsDevice* dev = (OpticsDevice*)&hw->map[x];
+	    if(dev->enOneshot) // start first conversion
+	    {
+	    	if(MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START) != HAL_OK)
+	    	{
+	    		status = HAL_ERROR;
+	    	}
+	    }
+	}
+
+	return status;
+}
+
+HAL_StatusTypeDef optics_adcStop(uint32_t mask)
+{
+	HAL_StatusTypeDef status = HAL_OK;
+    if ((!hw) || (!hw->map)) {
+        return HAL_ERROR;
+    }
+
+    active_optics_mask &= ~mask;
+
+    if(active_optics_mask == 0)
+    {
+    	// all stopped
+        for(int x=0; x<OpticsCount; x++)
+        {
+
+            OpticsDevice* dev = (OpticsDevice*)&hw->map[x];
+            if(MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_STANDBY) != HAL_OK)
+            {
+                status = HAL_ERROR;
+            }
+        }
+    }
+
+	return status;
+}
+
+uint32_t optics_get_active_optics_mask()
+{
+	return active_optics_mask;
+}
+
+HAL_StatusTypeDef optics_adcRead()
+{
+	HAL_StatusTypeDef status = HAL_OK;
+
+	if ((!hw) || (!hw->map)) {
+		return HAL_ERROR;
+	}
+
+	if (active_optics_mask == 0) {
+		return HAL_OK; /* nothing to read */
+	}
+
+	/* Iterate through all possible bits in the mask */
+	for (uint8_t bit = 0; bit < 32; ++bit) {
+		if ((active_optics_mask & (1u << bit)) == 0) {
+			continue; /* this channel not active */
+		}
+
+		/* Extract optic_index and channel ID from bit position */
+		uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
+		uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+
+		/* Validate bounds */
+		if (optic_index >= OpticsCount || ch_id >= MAX_ADC_CHANNELS) {
+			status = HAL_ERROR;
+			continue;
+		}
+
+		OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+		HAL_StatusTypeDef st = HAL_OK;
+
+		uint8_t read_ch_id;
+		int32_t code32;
+		uint8_t channels_mask = 0;
+		/* Extract the expected channels for this optic from the active_optics_mask */
+		uint8_t expected_mask = (uint8_t)((active_optics_mask >> (optic_index * 8)) & 0xFF);
+
+		for(int i = 0; i < 8 && channels_mask != expected_mask; i++){
+			st = MCP3462_ReadScanSample(&dev->adc_handle, &read_ch_id, &code32);
+			if (st == HAL_OK) {
+				/* code32 now holds a signed 16-bit ADC code in its low 16 bits */
+				uint16_t code16 = (uint16_t)code32;
+
+				/* Store the samples we got */
+				dev->adcSamples[read_ch_id][dev->dataPtr[read_ch_id]++] = (uint8_t)(code16 >> 8);
+				if (dev->dataPtr[read_ch_id] >= ADC_UART_BUFFER_SIZE) dev->dataPtr[read_ch_id] = 0;
+				dev->adcSamples[read_ch_id][dev->dataPtr[read_ch_id]++] = (uint8_t)(code16 & 0xFF);
+				if (dev->dataPtr[read_ch_id] >= ADC_UART_BUFFER_SIZE) dev->dataPtr[read_ch_id] = 0;
+
+				/* Mark this channel as received */
+				channels_mask |= (1u << read_ch_id);
+
+			} else if (st != HAL_BUSY) {
+				status = HAL_ERROR;
+				break;
+			}
+
+			delay_us(1200);
+		}
+
+		/* Start next conversion if in oneshot mode */
+		if(dev->enOneshot) {
+			if(MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START) != HAL_OK) {
+				status = HAL_ERROR;
+			}
+		}
+	}
+
+	return status;
+}
+
+HAL_StatusTypeDef optics_getBuffer_byMask(uint32_t mask, uint8_t** out_buffer,  uint16_t* out_size)
+{
+    if((!hw) || (!hw->map) || !out_buffer || !out_size || mask == 0){
+        return HAL_ERROR;
+    }
+
+    /* require exactly one bit set in mask */
+    if ((mask & (mask - 1)) != 0u) return HAL_ERROR;  
+
+	/* Find which bit is set */
+	uint8_t bit = 0;
+	uint32_t temp_mask = mask;
+	while ((temp_mask & 1) == 0) {
+		temp_mask >>= 1;
+		bit++;
+	}
+
+	/* Extract optic_index and channel ID from bit position */
+	uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
+	uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+
+	/* Validate that the optic_index and channel are within bounds */
+	if (optic_index >= OpticsCount || ch_id >= MAX_ADC_CHANNELS) {
+		return HAL_ERROR;
+	}
+
+	/* Get the device and return the buffer and size */
+	OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+	
+
+    *out_buffer = (uint8_t*)&(dev->adcSamples[ch_id]);
+    *out_size = dev->dataPtr[ch_id];
+
+	return HAL_OK;
+}
+
+HAL_StatusTypeDef optics_clearBuffer_byMask(uint32_t mask)
+{
+	HAL_StatusTypeDef status = HAL_OK;
+
+    if ((!hw) || (!hw->map)) {
+        return HAL_ERROR;
+    }
+
+    for (uint8_t bit = 0; bit < 32; ++bit) {
+        if ((mask & (1u << bit)) == 0) {
+            continue; /* this bit not set */
+        }
+
+        uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
+        uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+
+        if (optic_index >= OpticsCount) {
+            /* mark error but continue processing other bits */
+            status = HAL_ERROR;
+            break;
+        }
+
+        // printf("Clear OPTICS IDX: %d  CH: %d\r\n", optic_index,  ch_id);
+        /* call the provided clear function */
+        OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+    	memset(&dev->adcSamples[ch_id], 0, ADC_UART_BUFFER_SIZE);
+    	dev->dataPtr[ch_id] = 0;
+    }
+
+	return status;
+}
+
+HAL_StatusTypeDef optics_startLaser_byMask(uint32_t mask, uint16_t power) {
+	HAL_StatusTypeDef status = HAL_OK;
+	uint16_t set_power_level = 0;
+
+    if ((!hw) || (!hw->map)) {
+        return HAL_ERROR;
+    }
+
+
+	if (mask == 0) {
+		return HAL_OK; /* nothing to set */
+	}
+
+    active_laser_mask |= mask;
+    set_power_level = (power > 100) ? 100 : power;
+
+	/* Iterate through all possible bits in the mask */
+	for (uint8_t bit = 0; bit < 32; ++bit) {
+		if ((active_laser_mask & (1u << bit)) == 0) {
+			continue; /* this channel not active */
+		}
+
+		/* Extract optic_index and channel ID from bit position */
+		uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
+		uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+	    OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+
+	    dev->dacValue = (set_power_level * 4095) / 100;
+
+
+	    return MCP4922_WriteRaw(&dev->dac_handle,
+	    					   (MCP4922_Channel)ch_id,
+	                           MCP4922_BUF_OFF,
+	                           MCP4922_GAIN_1X,
+	                           MCP4922_ACTIVE,
+	                           dev->dacValue);
+	}
+
+    delay_us(OPTICS_SAMPLE_PERIOD_MS*1000);
+    return status;
+}
+
+HAL_StatusTypeDef optics_stopLaser_byMask(uint32_t mask) {
+	HAL_StatusTypeDef status = HAL_OK;
+
+    if ((!hw) || (!hw->map)) {
+        return HAL_ERROR;
+    }
+
+
+	if (mask == 0) {
+		return HAL_OK; /* nothing to set */
+	}
+
+	// Clear bits from the active laser mask
+	active_laser_mask &= ~mask;
+
+	/* Iterate through mask */
+	for (uint8_t bit = 0; bit < 32; ++bit) {
+		if ((mask & (1u << bit)) == 0) {
+			continue; /* this channel not active */
+		}
+
+		/* Extract optic_index and channel ID from bit position */
+		uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
+		uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+	    OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+
+	    dev->dacValue = 0;
+
+
+	    return MCP4922_WriteRaw(&dev->dac_handle,
+	    					   (MCP4922_Channel)ch_id,
+	                           MCP4922_BUF_OFF,
+	                           MCP4922_GAIN_1X,
+	                           MCP4922_ACTIVE,
+	                           dev->dacValue);
+	}
+    return status;
+}
+
+uint32_t optics_get_active_laser_mask(void)
+{
+	return active_laser_mask;
 }

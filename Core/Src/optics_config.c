@@ -13,7 +13,8 @@ static OpticsDevice OPTICS_MAP[] = {
 			.cs_port = ADC_CS_GPIO_Port,
 			.cs_pin = ADC_CS_Pin,
 			.dev_addr = 1,
-			.hspi = &hspi1
+			.hspi = &hspi1,
+			.chan_count = 2
 		},
 		.dac_handle = {
 			.cs_port = DAC_CS_GPIO_Port,
@@ -23,10 +24,13 @@ static OpticsDevice OPTICS_MAP[] = {
 			.shdn_port = NULL,
 			.shdn_pin = 0,
 			.vref_mV = 3300,
-			.hspi = &hspi1
+			.hspi = &hspi1,
+			.chan_count = 2
 		},
 		.enOneshot = true,  // oneshot mode: trigger conversion before each read
 		.scan_bits = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+		//.scan_bits = MCP3462_SCAN_DIFF_A | MCP3462_SCAN_DIFF_B,
+		//.scan_bits = MCP3462_SCAN_DIFF_A,
     }
 };
 

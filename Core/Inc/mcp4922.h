@@ -31,6 +31,9 @@ typedef struct {
 
     /* Analog reference in millivolts for convenience helpers */
     uint32_t vref_mV;        // e.g., 3300 for 3.3V reference
+
+    uint8_t chan_count;
+
 } MCP4922_Handle;
 
 /* ===== Options ===== */
