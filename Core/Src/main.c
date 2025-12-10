@@ -41,11 +41,10 @@
 /* USER CODE BEGIN PD */
 #define BUFFER_SIZE 128
 
-// Set to 1 to run the original single-channel CH0 example,
-// set to 0 to run the SCAN example (CH0 + CH1 single-ended).
-// #define USE_SINGLE_CHANNEL_EXAMPLE  1
+// Set to 1 for differential CH0 mode (CH0+ vs CH1-)
+#define USE_DIFFERENTIAL_CH0  1
 #define USE_ONE_SHOT 1
-#define USE_OPTICS 1
+#define USE_OPTICS 0
 
 /* USER CODE END PD */
 
@@ -94,24 +93,15 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-#ifndef USE_OPTICS
 	MCP3462_Handle adc_handle;
 	MCP4922_Handle dac_handle;
 	bool   isADCEnabled = true;
 	uint16_t dac_value = 0;
-#ifdef USE_SINGLE_CHANNEL_EXAMPLE
-	int16_t  code16;      // still here if you ever use single-channel mode
-#else
-	int32_t  code32;      // used for SCAN mode
-#endif
+	int32_t  code32;      // 32-bit ADC code for SCAN mode
 	uint8_t  buf[BUFFER_SIZE] = {0};
-	float    voltage_ch0 = 0.0f;
-	float    voltage_ch1 = 0.0f;
+	float    voltage_diff_ch0 = 0.0f;
+	float    voltage_diff_ch2 = 0.0f;
 	uint8_t  ch_id = 0;
-#else
-	uint16_t buffer_size;
-	uint8_t laser_power = 0;
-#endif
 
   /* USER CODE END 1 */
 
@@ -142,16 +132,11 @@ int main(void)
   DWT_Init();
   init_dma_logging();
   printf("\033c");
-  printf("ADC Demo FW\r\n\r\n");
+  printf("MCP3462 Dual Differential Demo\r\n\r\n");
   printf("CPU Clock Frequency: %lu MHz\r\n", HAL_RCC_GetSysClockFreq() / 1000000);
-  printf("Initialize ADC\r\n");
-
-#ifdef USE_OPTICS
-
-  optics_init();
-  optics_startLaser(0,laser_power);
-
-#else
+  printf("Initialize ADC in SCAN mode with two differential pairs:\r\n");
+  printf("  - DIFF_A: CH0 - CH1\r\n");
+  printf("  - DIFF_B: CH2 - CH3\r\n\r\n");
 
   adc_handle.hspi = &hspi1;
   adc_handle.cs_port = ADC_CS_GPIO_Port;
@@ -172,62 +157,41 @@ int main(void)
   MCP3462_Init(&adc_handle);
   MCP4922_Init(&dac_handle);
 
-
+  // Initialize DAC to 0V
   st = MCP4922_WriteRaw(&dac_handle,
   					     0,
                          MCP4922_BUF_OFF,
                          MCP4922_GAIN_1X,
                          MCP4922_ACTIVE,
 						 dac_value);
-#if USE_SINGLE_CHANNEL_EXAMPLE
 
-  // ---- Single-channel CH0 example (original working setup) ----
-  st = MCP3462_ConfigSimple(&adc_handle,
-                            MCP3462_OSR_256,
-                            MCP3462_GAIN_1,
-                            MCP3462_DATAFMT_16,
-#if USE_ONE_SHOT
-							MCP3462_CONV_1SHOT_STBY,
-#else
-                            MCP3462_CONV_CONT,
-#endif
-                            MCP3462_CH0,
-                            MCP3462_AGND);  // VIN+ = CH0, VIN- = AGND
-  if (st == HAL_OK) {
-      isADCEnabled = true;
-      MCP3462_DumpRegs(&adc_handle, buf, BUFFER_SIZE);
-  } else {
-      printf("Failed to configure ADC (single-channel), it is now disabled\r\n");
-      isADCEnabled = false;
-  }
-
-#else
-  // ---- SCAN example: CH0 and CH1 single-ended ----
+  // ---- SCAN mode with two differential pairs ----
+  // DIFF_A = CH0 - CH1 (bit 8)
+  // DIFF_B = CH2 - CH3 (bit 9)
   MCP3462_ScanConfig scan_cfg = {
-      .scan_mask    = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+      .scan_mask    = MCP3462_SCAN_DIFF_A | MCP3462_SCAN_DIFF_B,
       .dly_clocks   = 0,   // no extra delay between channels
       .timer_clocks = 0    // no extra delay between SCAN cycles
   };
 
   st = MCP3462_ConfigScan(&adc_handle,
-                          MCP3462_OSR_256,
-                          MCP3462_GAIN_1,
+                          MCP3462_OSR_256,       // Oversampling ratio
+                          MCP3462_GAIN_1,        // Gain = 1x
 #if USE_ONE_SHOT
-						  MCP3462_CONV_1SHOT_STBY,
+						  MCP3462_CONV_1SHOT_STBY,  // One-shot with standby
 #else
-						  MCP3462_CONV_CONT,
+						  MCP3462_CONV_CONT,        // Continuous conversion
 #endif
                           &scan_cfg);
+  
   if (st == HAL_OK) {
       isADCEnabled = true;
+      printf("ADC configured successfully in dual differential SCAN mode\r\n");
       MCP3462_DumpRegs(&adc_handle, buf, BUFFER_SIZE);
   } else {
       printf("Failed to configure ADC (SCAN mode), it is now disabled\r\n");
       isADCEnabled = false;
   }
-
-#endif
-#endif
 
 
   /* USER CODE END 2 */
@@ -240,122 +204,59 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-#ifdef USE_OPTICS
-
-	if(optics_adcStart(0x03) != HAL_OK) {
-		printf("++++++++++++> Failed Start Conversion\r\n");
-	}
-
-  	if(optics_adcReadSamples(0) != HAL_OK){
-  		printf("failed read samples\r\n");
-  		continue;
-  	}
-  	for(int x = 0; x < 2; x++){
-  		buffer_size = optics_getSize(0, x);
-		if(buffer_size > 0){
-			uint8_t* buffer = optics_getBuffer(0, x);
-			// Each sample is 2 bytes (high byte, low byte)
-			for(uint16_t i = 0; i < buffer_size; i += 2) {
-				uint16_t code = (uint16_t)((buffer[i] << 8) | buffer[i+1]);
-				// Convert to voltage (3.3V reference, GAIN_1, 16-bit signed)
-				float voltage = (float)code * (3.3f / 32767.0f);
-				printf("Sample %d: Code=%d, Voltage=%.4fV\r\n", x, code, voltage);
-			}
-		}
-  	}
-
-	optics_clearBuffer_byMask(0x0003);
-	optics_adcStop(0x03);
-  	laser_power+=10;
-  	if(laser_power>100) laser_power = 0;
-  	optics_startLaser(0, laser_power);
-    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-    HAL_Delay(500);
-
-#else
 #if USE_ONE_SHOT
+	// Start a new conversion in one-shot mode
 	st = MCP3462_FastCommand(&adc_handle, MCP3462_FC_CONV_START);
 	if (st != HAL_OK) {
-		printf("Failed Start Conversion\r\n");
+		printf("Failed to start conversion\r\n");
 		isADCEnabled = false;
 	}
-
 #endif
 
-#if USE_SINGLE_CHANNEL_EXAMPLE
-
-    // ---------- Single-channel CH0 example ----------
+    // Read both differential pairs from SCAN
     if (isADCEnabled) {
-        st = MCP3462_ReadData16_INC(&adc_handle, &code16);
-        if (st == HAL_OK) {
-            // 16-bit signed, ±Vref → use same scaling as before
-            float v = (float)code16 * (3.2f / 32768.0f);  // adjust 3.2f to your actual Vref
-            voltage_ch0 = v;
-        } else if (st != HAL_BUSY) {
-            printf("ADC Read error (single-channel): %d, disabling ADC\r\n", st);
-            isADCEnabled = false;
+        // Read both differential channels (DIFF_A and DIFF_B)
+        for(int i = 0; i < 2; i++) {
+            st = MCP3462_ReadScanSample(&adc_handle, &ch_id, &code32);
+            
+            if (st == HAL_OK) {
+                // code32 holds a signed 16-bit ADC code in its low 16 bits
+                int16_t code16 = (int16_t)(code32 & 0xFFFF);
+                float voltage = (float)code16 * (3.3f / 32768.0f);
+                
+                // ch_id identifies which differential pair:
+                // ch_id 8 = DIFF_A (CH0 - CH1)
+                // ch_id 9 = DIFF_B (CH2 - CH3)
+                if (ch_id == 8) {
+                    voltage_diff_ch0 = voltage;
+                    printf("DIFF_A (CH0-CH1): Code=%6d, Voltage=%+.4f V\r\n", 
+                           code16, voltage);
+                } else if (ch_id == 9) {
+                    voltage_diff_ch2 = voltage;
+                    printf("DIFF_B (CH2-CH3): Code=%6d, Voltage=%+.4f V\r\n", 
+                           code16, voltage);
+                } else {
+                    printf("Unexpected ch_id: %d, Code=%6d\r\n", ch_id, code16);
+                }
+                
+            } else if (st == HAL_BUSY) {
+                // Data not ready yet, try next iteration
+                break;
+            } else {
+                printf("ADC Read error: %d, disabling ADC\r\n", st);
+                isADCEnabled = false;
+                break;
+            }
+            
+            HAL_Delay(1);  // Small delay between channel reads
         }
     }
 
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     HAL_Delay(500);
 
-    if (isADCEnabled) {
-        if (st == HAL_OK) {
-            printf("CH0: %.4f V\r\n", voltage_ch0);
-        } else if (st == HAL_BUSY) {
-            printf("ADC Data not ready\r\n");
-        } else {
-            printf("ADC Read error: %d\r\n", st);
-        }
-    }
-
-#else
-
-    // ---------- SCAN example: CH0 + CH1 ----------
-    if (isADCEnabled) {
-        // SPI polling: ReadScanSample() returns HAL_BUSY if data not ready
-    	for(int i = 0; i < 8; i++){
-			st = MCP3462_ReadScanSample(&adc_handle, &ch_id, &code32);
-			if (st == HAL_OK) {
-
-				printf("  ch: %d value: 0x%04X\r\n", ch_id, (uint16_t)code32);
-
-				// code32 now holds a signed 16-bit ADC code in its low 16 bits
-				uint16_t code16 = (uint16_t)code32;
-				float v = (float)code16 * (3.3f / 32768.0f);  // adjust 3.2f to actual Vref
-
-				if (ch_id == 0) {
-					voltage_ch0 = v;
-				} else if (ch_id == 1) {
-					voltage_ch1 = v;
-				} else {
-					// other channels / internal sources, ignore for now
-				}
-
-			} else if (st != HAL_BUSY) {
-				printf("Failed to read ADC (SCAN), disabling ADC (st=%d)\r\n", st);
-				isADCEnabled = false;
-			}
-
-			HAL_Delay(1);
-    	}
-    }
-
-    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-    HAL_Delay(500);
-
-    if (isADCEnabled) {
-        if (st == HAL_OK) {
-            printf("CH0: %.4f V, CH1: %.4f V\r\n", voltage_ch0, voltage_ch1);
-        } else if (st == HAL_BUSY) {
-            printf("ADC Data not ready\r\n");
-        } else {
-            printf("ADC Read error: %d\r\n", st);
-        }
-    }
-
-	dac_value = (dac_value + 100)%4096;
+	// Optional: sweep DAC for testing differential input
+	dac_value = (dac_value + 100) % 4096;
 	st = MCP4922_WriteRaw(&dac_handle,
 						 0,
 						 MCP4922_BUF_OFF,
@@ -363,8 +264,6 @@ int main(void)
 						 MCP4922_ACTIVE,
 						 dac_value);
 
-#endif
-#endif
   }
   /* USER CODE END 3 */
 }
