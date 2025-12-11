@@ -138,10 +138,21 @@ int main(void)
 
   optics_getBuffer_byMask(1, &ptrBuffer, &data_len);
 
-  printf("COUNT: %d\r\n", data_len);
-  for(int i = 0; i < data_len; i++)
+  printf("\r\n=== ADC Sample Results ===\r\n");
+  printf("Total bytes captured: %d\r\n", data_len);
+  printf("Sample count: %d\r\n\r\n", data_len / 2);
+  
+  const float vref = 3.3f;  // External VREF voltage
+  const int32_t adc_max = 32768;  // 2^15 for 16-bit signed
+  
+  for(int i = 0; i < data_len; i += 2)
   {
-	  printf("0x%02x\r\n", ptrBuffer[i]);
+	  if (i + 1 < data_len) {
+		  uint16_t sample = (ptrBuffer[i] << 8) | ptrBuffer[i+1];
+		  int16_t signed_sample = (int16_t)sample;
+		  float voltage = ((float)signed_sample * vref) / (float)adc_max;
+		  printf("Sample %3d: 0x%04X (%6d) = %+7.4f V\r\n", i/2, sample, signed_sample, voltage);
+	  }
   }
 
 #if 0

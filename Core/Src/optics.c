@@ -18,6 +18,39 @@ static inline bool dac_handle_valid(const MCP4922_Handle *d) {
     return (d && d->hspi && d->cs_port);
 }
 
+/* Validate that the requested mask matches available scan_bits for each optic */
+static HAL_StatusTypeDef validate_mask_against_scan_bits(uint32_t mask) {
+    if ((!hw) || (!hw->map)) {
+        return HAL_ERROR;
+    }
+
+    /* Check each bit in the mask */
+    for (uint8_t bit = 0; bit < 32; ++bit) {
+        if ((mask & (1u << bit)) == 0) {
+            continue; /* this bit not set */
+        }
+
+        /* Extract optic_index and channel ID from bit position */
+        uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
+        uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+
+        /* Validate optic_index is in range */
+        if (optic_index >= OpticsCount) {
+            return HAL_ERROR;
+        }
+
+        OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+        
+        /* Check if this channel is enabled in scan_bits */
+        if ((dev->scan_bits & (1u << ch_id)) == 0) {
+            /* Requested channel is not available in scan_bits configuration */
+            return HAL_ERROR;
+        }
+    }
+
+    return HAL_OK;
+}
+
 static OpticsHwDesc* hw = NULL;
 static uint8_t OpticsCount = 0;
 static uint32_t active_optics_mask = 0;
@@ -310,6 +343,11 @@ HAL_StatusTypeDef optics_adcStart(uint32_t mask)
         return HAL_ERROR;
     }
 
+    /* Validate that the mask only contains channels enabled in scan_bits */
+    if (validate_mask_against_scan_bits(mask) != HAL_OK) {
+        return HAL_ERROR; /* Invalid mask - contains channels not in scan_bits */
+    }
+
 	/* Only start devices that aren't already active */
 	uint32_t new_mask = mask & ~active_optics_mask;
 
@@ -347,6 +385,11 @@ HAL_StatusTypeDef optics_adcStop(uint32_t mask)
 	HAL_StatusTypeDef status = HAL_OK;
     if ((!hw) || (!hw->map)) {
         return HAL_ERROR;
+    }
+
+    /* Validate that the mask only contains channels enabled in scan_bits */
+    if (validate_mask_against_scan_bits(mask) != HAL_OK) {
+        return HAL_ERROR; /* Invalid mask - contains channels not in scan_bits */
     }
 
 	/* Only stop devices that are currently active */
@@ -390,34 +433,36 @@ HAL_StatusTypeDef optics_adcRead()
 		return HAL_OK; /* nothing to read */
 	}
 
-	/* Iterate through all possible bits in the mask */
-	for (uint8_t bit = 0; bit < 32; ++bit) {
-		if ((active_optics_mask & (1u << bit)) == 0) {
-			continue; /* this channel not active */
-		}
-
-		/* Extract optic_index and channel ID from bit position */
-		uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
-		uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
-
-		/* Validate bounds */
-		if (optic_index >= OpticsCount || ch_id >= MAX_ADC_CHANNELS) {
-			status = HAL_ERROR;
-			continue;
-		}
-
+	/* Process each optic device */
+	for (uint8_t optic_index = 0; optic_index < OpticsCount; ++optic_index) {
 		OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
+		
+		/* Check if any channel for this optic is active */
+		uint8_t optic_mask = (uint8_t)((active_optics_mask >> (optic_index * 8)) & 0xFF);
+		if (optic_mask == 0) {
+			continue; /* no active channels for this optic */
+		}
+		
+		/* Only process channels that are both active AND in scan_bits */
+		uint8_t channels_to_read = optic_mask & (uint8_t)dev->scan_bits;
+		if (channels_to_read == 0) {
+			continue; /* no valid channels to read */
+		}
+		
 		HAL_StatusTypeDef st = HAL_OK;
-
 		uint8_t read_ch_id;
 		int32_t code32;
-		uint8_t channels_mask = 0;
-		/* Extract the expected channels for this optic from the active_optics_mask */
-		uint8_t expected_mask = (uint8_t)((active_optics_mask >> (optic_index * 8)) & 0xFF);
+		uint8_t channels_received = 0;
 
-		for(int i = 0; i < 8 && channels_mask != expected_mask; i++){
+		/* Try to read all expected channels (only those in scan_bits) */
+		for(int i = 0; i < 8 && channels_received != channels_to_read; i++){
 			st = MCP3462_ReadScanSample(&dev->adc_handle, &read_ch_id, &code32);
 			if (st == HAL_OK) {
+				/* Verify this is a channel we expect (in scan_bits) */
+				if ((dev->scan_bits & (1u << read_ch_id)) == 0) {
+					continue; /* unexpected channel, skip */
+				}
+				
 				/* code32 now holds a signed 16-bit ADC code in its low 16 bits */
 				uint16_t code16 = (uint16_t)code32;
 
@@ -428,7 +473,7 @@ HAL_StatusTypeDef optics_adcRead()
 				if (dev->dataPtr[read_ch_id] >= ADC_UART_BUFFER_SIZE) dev->dataPtr[read_ch_id] = 0;
 
 				/* Mark this channel as received */
-				channels_mask |= (1u << read_ch_id);
+				channels_received |= (1u << read_ch_id);
 
 			} else if (st != HAL_BUSY) {
 				status = HAL_ERROR;
