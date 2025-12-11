@@ -1,7 +1,7 @@
 #include "main.h"
 #include "optics.h"
 #include "interface_config.h"
-#include "utils.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -18,15 +18,15 @@ static inline bool dac_handle_valid(const MCP4922_Handle *d) {
     return (d && d->hspi && d->cs_port);
 }
 
-static const OpticsHwDesc* hw = NULL;
+static OpticsHwDesc* hw = NULL;
 static uint8_t OpticsCount = 0;
 static uint32_t active_optics_mask = 0;
 static uint32_t active_laser_mask = 0;
 
 /* Weak default: links even if the product doesn’t provide a mapping */
 __attribute__((weak))
-const OpticsHwDesc* OpticsConfig(void) {
-	static const OpticsHwDesc null_config = {
+OpticsHwDesc* OpticsConfig(void) {
+	static OpticsHwDesc null_config = {
 		.count = 0,
 		.map = NULL
 	};
@@ -305,16 +305,28 @@ int optics_getDeviceCount(void) {
 HAL_StatusTypeDef optics_adcStart(uint32_t mask)
 {
 	HAL_StatusTypeDef status = HAL_OK;
+
     if ((!hw) || (!hw->map)) {
         return HAL_ERROR;
     }
-    
-    active_optics_mask |= mask;
 
-	for(int x=0; x<OpticsCount; x++)
-	{
+	/* Only start devices that aren't already active */
+	uint32_t new_mask = mask & ~active_optics_mask;
 
-	    OpticsDevice* dev = (OpticsDevice*)&hw->map[x];
+    for (uint8_t bit = 0; bit < 32; ++bit) {
+        if ((new_mask & (1u << bit)) == 0) {
+            continue; /* this bit not set */
+        }
+
+        uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
+
+        if (optic_index >= OpticsCount) {
+            /* mark error but continue processing other bits */
+            status = HAL_ERROR;
+            break;
+        }
+
+        OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
 	    if(dev->enOneshot) // start first conversion
 	    {
 	    	if(MCP3462_FastCommand(&dev->adc_handle, MCP3462_FC_CONV_START) != HAL_OK)
@@ -322,7 +334,10 @@ HAL_StatusTypeDef optics_adcStart(uint32_t mask)
 	    		status = HAL_ERROR;
 	    	}
 	    }
-	}
+    }
+
+	/* update active mask with newly started devices */
+    active_optics_mask |= mask;
 
 	return status;
 }
@@ -334,8 +349,13 @@ HAL_StatusTypeDef optics_adcStop(uint32_t mask)
         return HAL_ERROR;
     }
 
-    active_optics_mask &= ~mask;
+	/* Only stop devices that are currently active */
+	uint32_t devices_to_stop = mask & active_optics_mask;
 
+	/* Remove stopped devices from active mask */
+    active_optics_mask &= ~devices_to_stop;
+
+	// stop all devices when mask is zero
     if(active_optics_mask == 0)
     {
     	// all stopped
@@ -414,8 +434,6 @@ HAL_StatusTypeDef optics_adcRead()
 				status = HAL_ERROR;
 				break;
 			}
-
-			delay_us(1200);
 		}
 
 		/* Start next conversion if in oneshot mode */
@@ -505,7 +523,6 @@ HAL_StatusTypeDef optics_startLaser_byMask(uint32_t mask, uint16_t power) {
         return HAL_ERROR;
     }
 
-
 	if (mask == 0) {
 		return HAL_OK; /* nothing to set */
 	}
@@ -513,21 +530,32 @@ HAL_StatusTypeDef optics_startLaser_byMask(uint32_t mask, uint16_t power) {
     active_laser_mask |= mask;
     set_power_level = (power > 100) ? 100 : power;
 
-	/* Iterate through all possible bits in the mask */
+	/* Iterate through all possible bits in the mask parameter (not active_laser_mask) */
 	for (uint8_t bit = 0; bit < 32; ++bit) {
-		if ((active_laser_mask & (1u << bit)) == 0) {
-			continue; /* this channel not active */
+		if ((mask & (1u << bit)) == 0) {
+			continue; /* this channel not in the requested mask */
 		}
 
 		/* Extract optic_index and channel ID from bit position */
 		uint8_t ch_id = (uint8_t)(bit & 0x7);          /* bit % 8 */
 		uint8_t optic_index = (uint8_t)(bit >> 3);     /* bit / 8 */
-	    OpticsDevice* dev = (OpticsDevice*)&hw->map[optic_index];
 
-	    dev->dacValue = (set_power_level * 4095) / 100;
+	    if (optic_index >= OpticsCount) {
+	    	status = HAL_ERROR;
+	    	continue;
+	    }
 
+	    OpticsDevice* dev = &hw->map[optic_index];
 
-	    return MCP4922_WriteRaw(&dev->dac_handle,
+	    if (!dev) {
+	    	status = HAL_ERROR;
+	    	continue;
+	    }
+
+	    uint32_t calc = (((uint32_t)set_power_level * 4095) + 50) / 100;
+	    dev->dacValue = (uint16_t)calc;
+
+	    status = MCP4922_WriteRaw(&dev->dac_handle,
 	    					   (MCP4922_Channel)ch_id,
 	                           MCP4922_BUF_OFF,
 	                           MCP4922_GAIN_1X,
@@ -568,7 +596,7 @@ HAL_StatusTypeDef optics_stopLaser_byMask(uint32_t mask) {
 	    dev->dacValue = 0;
 
 
-	    return MCP4922_WriteRaw(&dev->dac_handle,
+	    status = MCP4922_WriteRaw(&dev->dac_handle,
 	    					   (MCP4922_Channel)ch_id,
 	                           MCP4922_BUF_OFF,
 	                           MCP4922_GAIN_1X,

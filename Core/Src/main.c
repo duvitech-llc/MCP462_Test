@@ -25,11 +25,10 @@
 #include "mcp4922.h"
 #include "optics.h"
 #include "logging.h"
-#include "utils.h"
-
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <util.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,11 +39,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define BUFFER_SIZE 128
-
-// Set to 1 for differential CH0 mode (CH0+ vs CH1-)
-#define USE_DIFFERENTIAL_CH0  1
-#define USE_ONE_SHOT 1
-#define USE_OPTICS 0
 
 /* USER CODE END PD */
 
@@ -59,6 +53,8 @@ CRC_HandleTypeDef hcrc;
 RNG_HandleTypeDef hrng;
 
 SPI_HandleTypeDef hspi1;
+
+TIM_HandleTypeDef htim8;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
@@ -76,6 +72,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_CRC_Init(void);
 static void MX_RNG_Init(void);
+static void MX_TIM8_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -93,16 +90,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	MCP3462_Handle adc_handle;
-	MCP4922_Handle dac_handle;
-	bool   isADCEnabled = true;
-	uint16_t dac_value = 0;
-	int32_t  code32;      // 32-bit ADC code for SCAN mode
-	uint8_t  buf[BUFFER_SIZE] = {0};
-	float    voltage_diff_ch0 = 0.0f;
-	float    voltage_diff_ch2 = 0.0f;
-	uint8_t  ch_id = 0;
-
+  uint16_t data_len;
+  uint8_t* ptrBuffer;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -128,16 +117,34 @@ int main(void)
   MX_SPI1_Init();
   MX_CRC_Init();
   MX_RNG_Init();
+  MX_TIM8_Init();
   /* USER CODE BEGIN 2 */
   DWT_Init();
   init_dma_logging();
   printf("\033c");
-  printf("MCP3462 Dual Differential Demo\r\n\r\n");
+  printf("MCP3462 Demo\r\n\r\n");
   printf("CPU Clock Frequency: %lu MHz\r\n", HAL_RCC_GetSysClockFreq() / 1000000);
-  printf("Initialize ADC in SCAN mode with two differential pairs:\r\n");
-  printf("  - DIFF_A: CH0 - CH1\r\n");
-  printf("  - DIFF_B: CH2 - CH3\r\n\r\n");
 
+  optics_init();
+  optics_startLaser_byMask(1, 50);
+  optics_clearBuffer_byMask(1);
+  optics_adcStart(1);
+
+  HAL_TIM_Base_Start_IT(&htim8);
+
+  HAL_Delay(120);
+
+  HAL_TIM_Base_Stop_IT(&htim8);
+
+  optics_getBuffer_byMask(1, &ptrBuffer, &data_len);
+
+  printf("COUNT: %d\r\n", data_len);
+  for(int i = 0; i < data_len; i++)
+  {
+	  printf("0x%02x\r\n", ptrBuffer[i]);
+  }
+
+#if 0
   adc_handle.hspi = &hspi1;
   adc_handle.cs_port = ADC_CS_GPIO_Port;
   adc_handle.cs_pin = ADC_CS_Pin;
@@ -164,35 +171,8 @@ int main(void)
                          MCP4922_GAIN_1X,
                          MCP4922_ACTIVE,
 						 dac_value);
-
-  // ---- SCAN mode with two differential pairs ----
-  // DIFF_A = CH0 - CH1 (bit 8)
-  // DIFF_B = CH2 - CH3 (bit 9)
-  MCP3462_ScanConfig scan_cfg = {
-      .scan_mask    = MCP3462_SCAN_DIFF_A | MCP3462_SCAN_DIFF_B,
-      .dly_clocks   = 0,   // no extra delay between channels
-      .timer_clocks = 0    // no extra delay between SCAN cycles
-  };
-
-  st = MCP3462_ConfigScan(&adc_handle,
-                          MCP3462_OSR_256,       // Oversampling ratio
-                          MCP3462_GAIN_1,        // Gain = 1x
-#if USE_ONE_SHOT
-						  MCP3462_CONV_1SHOT_STBY,  // One-shot with standby
-#else
-						  MCP3462_CONV_CONT,        // Continuous conversion
 #endif
-                          &scan_cfg);
   
-  if (st == HAL_OK) {
-      isADCEnabled = true;
-      printf("ADC configured successfully in dual differential SCAN mode\r\n");
-      MCP3462_DumpRegs(&adc_handle, buf, BUFFER_SIZE);
-  } else {
-      printf("Failed to configure ADC (SCAN mode), it is now disabled\r\n");
-      isADCEnabled = false;
-  }
-
 
   /* USER CODE END 2 */
 
@@ -213,48 +193,10 @@ int main(void)
 	}
 #endif
 
-    // Read both differential pairs from SCAN
-    if (isADCEnabled) {
-        // Read both differential channels (DIFF_A and DIFF_B)
-        for(int i = 0; i < 2; i++) {
-            st = MCP3462_ReadScanSample(&adc_handle, &ch_id, &code32);
-            
-            if (st == HAL_OK) {
-                // code32 holds a signed 16-bit ADC code in its low 16 bits
-                int16_t code16 = (int16_t)(code32 & 0xFFFF);
-                float voltage = (float)code16 * (3.3f / 32768.0f);
-                
-                // ch_id identifies which differential pair:
-                // ch_id 8 = DIFF_A (CH0 - CH1)
-                // ch_id 9 = DIFF_B (CH2 - CH3)
-                if (ch_id == 8) {
-                    voltage_diff_ch0 = voltage;
-                    printf("DIFF_A (CH0-CH1): Code=%6d, Voltage=%+.4f V\r\n", 
-                           code16, voltage);
-                } else if (ch_id == 9) {
-                    voltage_diff_ch2 = voltage;
-                    printf("DIFF_B (CH2-CH3): Code=%6d, Voltage=%+.4f V\r\n", 
-                           code16, voltage);
-                } else {
-                    printf("Unexpected ch_id: %d, Code=%6d\r\n", ch_id, code16);
-                }
-                
-            } else if (st == HAL_BUSY) {
-                // Data not ready yet, try next iteration
-                break;
-            } else {
-                printf("ADC Read error: %d, disabling ADC\r\n", st);
-                isADCEnabled = false;
-                break;
-            }
-            
-            HAL_Delay(1);  // Small delay between channel reads
-        }
-    }
-
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     HAL_Delay(500);
 
+#if 0
 	// Optional: sweep DAC for testing differential input
 	dac_value = (dac_value + 100) % 4096;
 	st = MCP4922_WriteRaw(&dac_handle,
@@ -263,7 +205,7 @@ int main(void)
 						 MCP4922_GAIN_1X,
 						 MCP4922_ACTIVE,
 						 dac_value);
-
+#endif
   }
   /* USER CODE END 3 */
 }
@@ -430,6 +372,53 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM8 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM8_Init(void)
+{
+
+  /* USER CODE BEGIN TIM8_Init 0 */
+
+  /* USER CODE END TIM8_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM8_Init 1 */
+
+  /* USER CODE END TIM8_Init 1 */
+  htim8.Instance = TIM8;
+  htim8.Init.Prescaler = 80-1;
+  htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim8.Init.Period = 12000-1;
+  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim8.Init.RepetitionCounter = 0;
+  htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim8, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM8_Init 2 */
+
+  /* USER CODE END TIM8_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -584,6 +573,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
+
+  if (htim->Instance == TIM8) {
+	  optics_adcRead();
+  }
 
   /* USER CODE END Callback 1 */
 }

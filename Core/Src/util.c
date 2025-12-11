@@ -5,8 +5,8 @@
  *      Author: gvigelet
  */
 
-#include "utils.h"
 #include <stdio.h>
+#include <util.h>
 // testing crc calculations
 #define BUFFER_SIZE  9
 static const uint8_t CRC16_DATA8[BUFFER_SIZE] = {0x4D, 0x3C, 0x2B, 0x1A,

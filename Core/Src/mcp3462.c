@@ -1,7 +1,7 @@
 #include "mcp3462.h"
-#include "utils.h"
 #include <string.h>
 #include <stdio.h>
+#include <util.h>
 
 /* ---------- GPIO helpers ---------- */
 #define CS_LOW(d)   HAL_GPIO_WritePin((d)->cs_port, (d)->cs_pin, GPIO_PIN_RESET)

@@ -10,7 +10,7 @@
 #define MAX_DAC_CHANNELS			2   // max DAC channels
 #define MAX_ADC_CHANNELS			8   // max ADC channels
 #define ADC_UART_BUFFER_SIZE		256   // max 128 samples before rollover 128 * 2 bytes per sample
-#define OPTICS_CAPTURE_FREQUENCY	1000    // (1MHz / 1000 = 1kHz) -> 1ms
+#define OPTICS_CAPTURE_FREQUENCY	12000    // (1MHz / 1200 = 833.33Hz) -> 1.2ms
 
 typedef struct {
     MCP4922_Handle dac_handle;
@@ -22,7 +22,7 @@ typedef struct {
 	bool enOneshot;
     uint16_t scan_bits;
 
-    volatile uint16_t dacValue;
+    uint16_t dacValue;
 } OpticsDevice;
 
 typedef struct {

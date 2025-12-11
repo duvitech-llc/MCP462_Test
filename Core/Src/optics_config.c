@@ -28,7 +28,7 @@ static OpticsDevice OPTICS_MAP[] = {
 			.chan_count = 2
 		},
 		.enOneshot = true,  // oneshot mode: trigger conversion before each read
-		.scan_bits = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH1_SE,
+		.scan_bits = MCP3462_SCAN_CH0_SE | MCP3462_SCAN_CH2_SE,
 		//.scan_bits = MCP3462_SCAN_DIFF_A | MCP3462_SCAN_DIFF_B,
 		//.scan_bits = MCP3462_SCAN_DIFF_A,
     }

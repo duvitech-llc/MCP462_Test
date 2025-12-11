@@ -60,6 +60,10 @@ void DMA1_Channel7_IRQHandler(void);
 void TIM1_TRG_COM_TIM17_IRQHandler(void);
 void SPI1_IRQHandler(void);
 void USART2_IRQHandler(void);
+void TIM8_BRK_IRQHandler(void);
+void TIM8_UP_IRQHandler(void);
+void TIM8_TRG_COM_IRQHandler(void);
+void TIM8_CC_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

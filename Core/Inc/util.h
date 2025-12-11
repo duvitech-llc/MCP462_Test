@@ -5,8 +5,8 @@
  *      Author: gvigelet
  */
 
-#ifndef INC_UTILS_H_
-#define INC_UTILS_H_
+#ifndef INC_UTIL_H_
+#define INC_UTIL_H_
 
 
 #include "main.h"
@@ -23,4 +23,4 @@ uint32_t fnv1a_32(const uint8_t *data, size_t len);
 void DWT_Init(void);
 void delay_us(uint32_t us);
 
-#endif /* INC_UTILS_H_ */
+#endif /* INC_UTIL_H_ */

@@ -4,8 +4,8 @@
  *  Created on: Sep 12, 2025
  *      Author: gvigelet
  */
+#include <util.h>
 #include "mcp4922.h"
-#include "utils.h"
 
 /* ===== Local helpers ===== */
 #define CS_LOW(d)   HAL_GPIO_WritePin((d)->cs_port,   (d)->cs_pin,   GPIO_PIN_RESET)
